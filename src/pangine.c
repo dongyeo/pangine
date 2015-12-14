@@ -30,6 +30,7 @@ int main(int argc, char **argv)
 
     listenfd = Open_listenfd(port);
     while (1) {
+    fprintf(stderr,"loopping");
     clientlen = sizeof(clientaddr);
     connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); //line:netp:tiny:accept
     doit(connfd);                                             //line:netp:tiny:doit

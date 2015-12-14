@@ -165,7 +165,6 @@ int open_listenfd(int portno);
 /* Wrappers for client/server helper functions */
 int Open_clientfd(char *hostname, int port);
 int Open_listenfd(int port); 
-#include "csapp.c"
 #endif /* __CSAPP_H__ */
 /* $end csapp.h */
 

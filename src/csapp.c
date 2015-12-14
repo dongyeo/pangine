@@ -5,7 +5,7 @@
  *   *   rio_readnb: removed redundant EINTR check
  *    */
 /* $begin csapp.c */
-//#include "csapp.h"
+#include "csapp.h"
 
 /************************** 
  *  * Error-handling functions

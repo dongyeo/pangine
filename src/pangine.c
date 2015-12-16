@@ -6,7 +6,7 @@
  *   *     GET method to serve static and dynamic content.
  *    */
 #include "csapp.h"
-
+void * worker(void *connfd);
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
@@ -27,14 +27,18 @@ int main(int argc, char **argv)
     exit(1);
     }
     port = atoi(argv[1]);
-
+    if(tpool_create(5)!=0){
+	fprintf(stderr,"tpool_create failed\n");
+	exit(1);
+    }
     listenfd = Open_listenfd(port);
     while (1) {
     fprintf(stderr,"loopping");
     clientlen = sizeof(clientaddr);
     connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); //line:netp:tiny:accept
-    doit(connfd);                                             //line:netp:tiny:doit
-    Close(connfd);                                            //line:netp:tiny:close
+    // doit(connfd);                                             //line:netp:tiny:doit
+    // Close(connfd);                                            //line:netp:tiny:close
+    tpool_add_work(worker,(void *)connfd);
     }
 }
 /* $end tinymain */
@@ -230,3 +234,8 @@ void clienterror(int fd, char *cause, char *errnum,
 }
 /* $end clienterror */
 
+void * worker(void *connfd){
+   int connfdin = (int) connfd;
+    doit(connfdin);                                             //line:netp:tiny:doit
+    Close(connfdin);                           
+}

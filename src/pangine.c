@@ -1,241 +1,178 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <fcntl.h>
+#include <errno.h>
+#include "threadPool.h"
 
-
-/* $begin tinymain */
-/*
- *  * tiny.c - A simple, iterative HTTP/1.0 Web server that uses the 
- *   *     GET method to serve static and dynamic content.
- *    */
-#include "csapp.h"
-void * worker(void *connfd);
-void doit(int fd);
-void read_requesthdrs(rio_t *rp);
-int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filesize);
-void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
-void clienterror(int fd, char *cause, char *errnum, 
-         char *shortmsg, char *longmsg);
-
-int main(int argc, char **argv) 
-{
-    int listenfd, connfd, port, clientlen;
-    struct sockaddr_in clientaddr;
-
-    /* Check command line args */
-    if (argc != 2) {
-    fprintf(stderr, "usage: %s <port>\n", argv[0]);
-    exit(1);
+#define BUF_SIZE 1024
+#define SMALL_BUF 100
+#define EPOLL_SIZE 50
+void set_no_blocking_mode(int fd);
+void error_handling(char  *msg);
+void *worker(void * arg);
+void send_data(FILE* fp,char* content,char* file_name);
+void send_error(FILE* fp);
+void content_type(char * file);
+int epfd;
+int main(int argc,char * argv[]){
+    int serv_sock,clnt_sock;
+    struct sockaddr_in serv_adr,clnt_adr;
+    socklen_t adr_size;
+    int str_len,i;
+    char buf[BUF_SIZE];
+    
+    struct epoll_event *ep_events;
+    struct epoll_event event;
+    int event_cnt;
+    if(argc!=2){
+        printf("Usage : %s <port> \n",argv[0]);
+        exit(1);
     }
-    port = atoi(argv[1]);
-    if(tpool_create(5)!=0){
-	fprintf(stderr,"tpool_create failed\n");
-	exit(1);
+    serv_sock = socket(PF_INET,SOCK_STREAM,0);
+    memset(&serv_adr,0,sizeof(serv_adr));
+    serv_adr.sin_family = AF_INET;
+    serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_adr.sin_port = htons(atoi(argv[1]));
+    if(bind(serv_sock,(struct sockaddr *)&serv_adr,sizeof(serv_adr))==-1){
+       error_handling ("bind() error");
     }
-    listenfd = Open_listenfd(port);
-    while (1) {
-    fprintf(stderr,"loopping");
-    clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); //line:netp:tiny:accept
-    // doit(connfd);                                             //line:netp:tiny:doit
-    // Close(connfd);                                            //line:netp:tiny:close
-    tpool_add_work(worker,(void *)connfd);
+    if(listen(serv_sock,5)==-1){
+        error_handling("listen() error");
     }
-}
-/* $end tinymain */
-
-/*
- *  * doit - handle one HTTP request/response transaction
- *   */
-/* $begin doit */
-void doit(int fd) 
-{
-    int is_static;
-    struct stat sbuf;
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char filename[MAXLINE], cgiargs[MAXLINE];
-    rio_t rio;
-  
-    /* Read request line and headers */
-    Rio_readinitb(&rio, fd);
-    Rio_readlineb(&rio, buf, MAXLINE);                   //line:netp:doit:readrequest
-    sscanf(buf, "%s %s %s", method, uri, version);       //line:netp:doit:parserequest
-    if (strcasecmp(method, "GET")) {                     //line:netp:doit:beginrequesterr
-       clienterror(fd, method, "501", "Not Implemented",
-                "Tiny does not implement this method");
-        return;
-    }                                                    //line:netp:doit:endrequesterr
-    read_requesthdrs(&rio);                              //line:netp:doit:readrequesthdrs
-
-    /* Parse URI from GET request */
-    is_static = parse_uri(uri, filename, cgiargs);       //line:netp:doit:staticcheck
-    if (stat(filename, &sbuf) < 0) {                     //line:netp:doit:beginnotfound
-    clienterror(fd, filename, "404", "Not found",
-            "Tiny couldn't find this file");
-    return;
-    }                                                    //line:netp:doit:endnotfound
-
-    if (is_static) { /* Serve static content */          
-    if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) { //line:netp:doit:readable
-        clienterror(fd, filename, "403", "Forbidden",
-            "Tiny couldn't read the file");
-        return;
+    
+    epfd = epoll_create(EPOLL_SIZE);
+    ep_events = malloc(sizeof(struct epoll_event)*EPOLL_SIZE);
+    
+    set_no_blocking_mode(serv_sock);
+    event.events = EPOLLIN;
+    event.data.fd = serv_sock;
+    epoll_ctl(epfd,EPOLL_CTL_ADD,serv_sock,&event);
+    
+    if(tpool_create(5) !=0){
+        error_handling("tpool_create() error");
     }
-    serve_static(fd, filename, sbuf.st_size);        //line:netp:doit:servestatic
+    
+    while(1){
+        event_cnt = epoll_wait(epfd,ep_events,EPOLL_SIZE,-1);
+        if(event_cnt == -1){
+            error_handling("epoll_wait() error");
+            break;
+        }
+        for(i=0;i<event_cnt;i++){
+            if(ep_events[i].data.fd == serv_sock){
+                adr_size = sizeof(clnt_adr);
+                clnt_sock = accept(serv_sock,(struct sockaddr*)&clnt_adr,&adr_size);
+                set_no_blocking_mode(clnt_sock);
+                event.events = EPOLLIN|EPOLLET;
+                event.data.fd = clnt_sock;
+                epoll_ctl(epfd,EPOLL_CTL_ADD,clnt_sock,&event);
+            }else{
+                int fd = ep_events[i].data.fd;
+                tpool_add_work(worker,(void *)&fd);
+            }
+        }
     }
-    else { /* Serve dynamic content */
-    if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) { //line:netp:doit:executable
-        clienterror(fd, filename, "403", "Forbidden",
-            "Tiny couldn't run the CGI program");
-        return;
-    }
-    serve_dynamic(fd, filename, cgiargs);            //line:netp:doit:servedynamic
-    }
-}
-/* $end doit */
-
-/*
- *  * read_requesthdrs - read and parse HTTP request headers
- *   */
-/* $begin read_requesthdrs */
-void read_requesthdrs(rio_t *rp) 
-{
-    char buf[MAXLINE];
-
-    Rio_readlineb(rp, buf, MAXLINE);
-    while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
-    Rio_readlineb(rp, buf, MAXLINE);
-    printf("%s", buf);
-    }
-    return;
-}
-/* $end read_requesthdrs */
-
-/*
- *  * parse_uri - parse URI into filename and CGI args
- *   *             return 0 if dynamic content, 1 if static
- *    */
-/* $begin parse_uri */
-int parse_uri(char *uri, char *filename, char *cgiargs) 
-{
-    char *ptr;
-
-    if (!strstr(uri, "cgi-bin")) {  /* Static content */ //line:netp:parseuri:isstatic
-    strcpy(cgiargs, "");                             //line:netp:parseuri:clearcgi
-    strcpy(filename, ".");                           //line:netp:parseuri:beginconvert1
-    strcat(filename, uri);                           //line:netp:parseuri:endconvert1
-    if (uri[strlen(uri)-1] == '/')                   //line:netp:parseuri:slashcheck
-        strcat(filename, "home.html");               //line:netp:parseuri:appenddefault
-    return 1;
-    }
-    else {  /* Dynamic content */                        //line:netp:parseuri:isdynamic
-    ptr = index(uri, '?');                           //line:netp:parseuri:beginextract
-    if (ptr) {
-        strcpy(cgiargs, ptr+1);
-        *ptr = '\0';
-    }
-    else 
-        strcpy(cgiargs, "");                         //line:netp:parseuri:endextract
-    strcpy(filename, ".");                           //line:netp:parseuri:beginconvert2
-    strcat(filename, uri);                           //line:netp:parseuri:endconvert2
+    close(serv_sock);
+    close(epfd);
     return 0;
+}
+
+void set_no_blocking_mode(int fd){
+    int flag = fcntl(fd,F_GETFL,0);
+    fcntl(fd,F_SETFL,flag|O_NOBLOCK);
+}
+
+void error_handling(cahr *msg){
+    fputs(msg,stderr);
+    fputc('\n',stderr);
+    exit(1);
+}
+void * worker((void*) arg){
+    int client = *((int *)arg);
+    char req_line[SMALL_BUF];
+    FILE * clnt_read;
+    FILE * clnt_write;
+    char method[10];
+    char file_name[30];
+    
+    clnt_read = fdopen(client,"r");
+    clnt_write = fdopen(dup(client),"w");
+    fgets(req_line,SMALL_BUF,clnt_read);
+    if(strstr(req_line,"HTTP/") == NULL){
+        send_error(clnt_write);
+        fclose(clnt_read);
+        fclose(clnt_write);
+        return;
     }
-}
-/* $end parse_uri */
-
-/*
- *  * serve_static - copy a file back to the client 
- *   */
-/* $begin serve_static */
-void serve_static(int fd, char *filename, int filesize) 
-{
-    int srcfd;
-    char *srcp, filetype[MAXLINE], buf[MAXBUF];
- 
-    /* Send response headers to client */
-    get_filetype(filename, filetype);       //line:netp:servestatic:getfiletype
-    sprintf(buf, "HTTP/1.0 200 OK\r\n");    //line:netp:servestatic:beginserve
-    sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
-    sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
-    Rio_writen(fd, buf, strlen(buf));       //line:netp:servestatic:endserve
-
-    /* Send response body to client */
-    srcfd = Open(filename, O_RDONLY, 0);    //line:netp:servestatic:open
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);//line:netp:servestatic:mmap
-    Close(srcfd);                           //line:netp:servestatic:close
-    Rio_writen(fd, srcp, filesize);         //line:netp:servestatic:write
-    Munmap(srcp, filesize);                 //line:netp:servestatic:munmap
+    strcpy(memset,strtok(req_line," /"));
+    strcpy(file_name,strtok(NULL," /"));
+    strcpy(ct,content_type(file_name));
+    if(strcmp(method,"GET") != 0){
+        send_error(clnt_write);
+        close(clnt_read);
+        close(clnt_write);
+        return ;
+    }
+    fclose(clnt_read);
+    send_data(clnt_write,ct,file_name);
+    epoll_ctl(epfd,EPOLL_CTL_DEL,client,NULL);
 }
 
-/*
- *  * get_filetype - derive file type from file name
- *   */
-void get_filetype(char *filename, char *filetype) 
-{
-    if (strstr(filename, ".html"))
-    strcpy(filetype, "text/html");
-    else if (strstr(filename, ".gif"))
-    strcpy(filetype, "image/gif");
-    else if (strstr(filename, ".jpg"))
-    strcpy(filetype, "image/jpeg");
+void send_data(FILE * fp,char){
+    char protocal[] = "HTTP/1.0 200 OK\r\n";
+    char server[] = "Server:Linux Web Server Pangine\r\n";
+    char cnt_len[] = "Content-length:2048\r\n";
+    char cnt_type[SMALL_BUF];
+    char buf[BUF_SIZE];
+    FILE* send_file;
+    sprintf(cnt_type,"Content-type:%s\r\n\r\n",ct);
+    send_file = fopen(file_name,"r");
+    if(send_file == NULL){
+        send_error(fp);
+    }
+    
+    fputs(protocal,fp);
+    fputs(server,fp);
+    fputs(cnt_len,fp);
+    fputs(cnt_type,fp);
+    
+    while(fgets(buf,BUF_SIZE,send_file) != NULL){
+        fputs(buf,fp);
+        fflush(fp);
+    }
+    fflush(fp);
+    fclose(fp);
+}
+
+char * content_type(char * file){
+    char extension[SMALL_BUF];
+    char file_name[SMALL_BUF];
+    strcpy(file_name,file);
+    strtok(file_name,".");
+    strcpy(extension,strtok(NULL,"."));
+    
+    if(!strcmp(extension,"html") || ! strcmp(extension,"htm"))
+        return "text/html";
     else
-    strcpy(filetype, "text/plain");
-}  
-/* $end serve_static */
-
-/*
- *  * serve_dynamic - run a CGI program on behalf of the client
- *   */
-/* $begin serve_dynamic */
-void serve_dynamic(int fd, char *filename, char *cgiargs) 
-{
-    char buf[MAXLINE], *emptylist[] = { NULL };
-
-    /* Return first part of HTTP response */
-    sprintf(buf, "HTTP/1.0 200 OK\r\n"); 
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Server: Tiny Web Server\r\n");
-    Rio_writen(fd, buf, strlen(buf));
-  
-    if (Fork() == 0) { /* child */ //line:netp:servedynamic:fork
-    /* Real server would set all CGI vars here */
-    setenv("QUERY_STRING", cgiargs, 1); //line:netp:servedynamic:setenv
-    Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ //line:netp:servedynamic:dup2
-    Execve(filename, emptylist, environ); /* Run CGI program */ //line:netp:servedynamic:execve
-    }
-    Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
+        return "text/plain";
 }
-/* $end serve_dynamic */
 
-/*
- *  * clienterror - returns an error message to the client
- *   */
-/* $begin clienterror */
-void clienterror(int fd, char *cause, char *errnum, 
-         char *shortmsg, char *longmsg) 
-{
-    char buf[MAXLINE], body[MAXBUF];
-
-    /* Build the HTTP response body */
-    sprintf(body, "<html><title>Tiny Error</title>");
-    sprintf(body, "%s<body bgcolor=""ffffff"">\r\n", body);
-    sprintf(body, "%s%s: %s\r\n", body, errnum, shortmsg);
-    sprintf(body, "%s<p>%s: %s\r\n", body, longmsg, cause);
-    sprintf(body, "%s<hr><em>The Tiny Web server</em>\r\n", body);
-
-    /* Print the HTTP response */
-    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Content-type: text/html\r\n");
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
-    Rio_writen(fd, buf, strlen(buf));
-    Rio_writen(fd, body, strlen(body));
-}
-/* $end clienterror */
-
-void * worker(void *connfd){
-   int connfdin = (int) connfd;
-    doit(connfdin);                                             //line:netp:tiny:doit
-    Close(connfdin);                           
+void send_error(FILE * fp){
+    char protocal[]="HTTP/1.0 400 Bad Request\r\n";
+    char server[]="Server:Linux Web Server Pangine \r\n";
+    char cnt_len[]="Content-length:2048\r\n";
+    char cnt_type[]="Content-type:text/html\r\n\r\n";
+    char content[]="<html><h1>ERROR!<h1></html>";
+    
+    fputs(protocal,fp);
+    fputs(server,fp);
+    fputs(cnt_len,fp);
+    fputs(cnt_type,fp);
+    fputs(content,fp);
+    fflush(fp);
 }

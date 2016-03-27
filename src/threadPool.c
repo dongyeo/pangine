@@ -1,4 +1,3 @@
-
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -54,6 +53,7 @@ tpool_create(int max_thr_num)
    tpool->max_thr_num = max_thr_num;
    tpool->shutdown = 0;
    tpool->queue_head = NULL;
+   tpool->queue_tail = NULL;
    if (pthread_mutex_init(&tpool->queue_lock, NULL) !=0) {
        printf("%s: pthread_mutex_init failed, errno:%d, error:%s\n",
            __FUNCTION__, errno, strerror(errno));
@@ -137,7 +137,7 @@ tpool_add_work(void*(*routine)(void*), void *arg)
   work->next = NULL;
 
   pthread_mutex_lock(&tpool->queue_lock);    
-  member = tpool->queue_head;
+  /* member = tpool->queue_head;
   if (!member) {
       tpool->queue_head = work;
   } else {
@@ -145,8 +145,15 @@ tpool_add_work(void*(*routine)(void*), void *arg)
           member = member->next;
       }
       member->next = work;
-  }
+  }*/
   /* 通知工作者线程，有新任务添加 */
+  if(!tpool->queue_head){
+    tpool->queue_head = work;
+    tpool->queue_tail = work;
+  }else{
+    tpool->queue_tail->next = work;
+    tpool->queue_tail = work;
+  }
   pthread_cond_signal(&tpool->queue_ready);
   pthread_mutex_unlock(&tpool->queue_lock);
 

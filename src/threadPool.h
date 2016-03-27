@@ -17,6 +17,7 @@ typedef struct tpool {
    int             max_thr_num;                /* 最大线程数 */
    pthread_t       *thr_id;                    /* 线程ID数组 */
    tpool_work_t    *queue_head;                /* 线程链表 */
+   tpool_work_t    *queue_tail;
    pthread_mutex_t queue_lock;                    
    pthread_cond_t  queue_ready;    
 }tpool_t;

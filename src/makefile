@@ -1,10 +1,6 @@
-objects = pangine.o csapp.o threadPool.o
+objects = threadPool.o pangine.c
 pangine : $(objects)
 	gcc -o pangine $(objects) -lpthread
-pangine.o : pangine.c csapp.h
-	gcc -c pangine.c
-csapp.o : csapp.c csapp.h
-	gcc -c csapp.c
 threadPool.o : threadPool.c threadPool.h
 	gcc -c threadPool.c
 clean :

@@ -48,37 +48,14 @@ int main(int argc,char * argv[]){
         error_handling("listen() error");
     }
     
-    epfd = epoll_create(EPOLL_SIZE);
-    ep_events = malloc(sizeof(struct epoll_event)*EPOLL_SIZE);
-    
-    set_no_blocking_mode(serv_sock);
-    event.events = EPOLLIN;
-    event.data.fd = serv_sock;
-    epoll_ctl(epfd,EPOLL_CTL_ADD,serv_sock,&event);
-    
     if(tpool_create(5) !=0){
         error_handling("tpool_create() error");
     }
     
     while(1){
-        event_cnt = epoll_wait(epfd,ep_events,EPOLL_SIZE,-1);
-        if(event_cnt == -1){
-            error_handling("epoll_wait() error");
-            break;
-        }
-        for(i=0;i<event_cnt;i++){
-            if(ep_events[i].data.fd == serv_sock){
-                adr_size = sizeof(clnt_adr);
-                clnt_sock = accept(serv_sock,(struct sockaddr*)&clnt_adr,&adr_size);
-                set_no_blocking_mode(clnt_sock);
-                event.events = EPOLLIN|EPOLLET;
-                event.data.fd = clnt_sock;
-                epoll_ctl(epfd,EPOLL_CTL_ADD,clnt_sock,&event);
-            }else{
-                // int fd = ep_events[i].data.fd;
-                tpool_add_work(worker,(void *)&ep_events[i].data.fd);
-            }
-        }
+        adr_size = sizeof(clnt_adr);
+        clnt_sock = accept(serv_sock,(struct sockaddr*)&clnt_adr,&adr_size);
+        tpool_add_work(worker,(void*)&clnt_sock);
     }
     close(serv_sock);
     close(epfd);
@@ -123,6 +100,7 @@ void * worker(void* arg){
         return ;
     }
     fclose(clnt_read);
+    close(client);
     send_data(clnt_write,ct,file_name);
     epoll_ctl(epfd,EPOLL_CTL_DEL,client,NULL);
 }

@@ -17,12 +17,12 @@ void error_handling(char  *msg);
 void *worker(void * arg);
 void send_data(FILE* fp,char* content,char* file_name);
 void send_error(FILE* fp);
-void content_type(char * file);
+char* content_type(char * file);
 int epfd;
 int main(int argc,char * argv[]){
-    int serv_sock,clnt_sock;
+    int serv_sock,clnt_sock,option;
     struct sockaddr_in serv_adr,clnt_adr;
-    socklen_t adr_size;
+    socklen_t opt_len, adr_size;
     int str_len,i;
     char buf[BUF_SIZE];
     
@@ -34,6 +34,9 @@ int main(int argc,char * argv[]){
         exit(1);
     }
     serv_sock = socket(PF_INET,SOCK_STREAM,0);
+    opt_len = sizeof(option);
+    option = 1;
+    setsockopt(serv_sock,SOL_SOCKET,SO_REUSEADDR,(void*)&option,opt_len);
     memset(&serv_adr,0,sizeof(serv_adr));
     serv_adr.sin_family = AF_INET;
     serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -72,8 +75,8 @@ int main(int argc,char * argv[]){
                 event.data.fd = clnt_sock;
                 epoll_ctl(epfd,EPOLL_CTL_ADD,clnt_sock,&event);
             }else{
-                int fd = ep_events[i].data.fd;
-                tpool_add_work(worker,(void *)&fd);
+                // int fd = ep_events[i].data.fd;
+                tpool_add_work(worker,(void *)&ep_events[i].data.fd);
             }
         }
     }
@@ -84,20 +87,21 @@ int main(int argc,char * argv[]){
 
 void set_no_blocking_mode(int fd){
     int flag = fcntl(fd,F_GETFL,0);
-    fcntl(fd,F_SETFL,flag|O_NOBLOCK);
+    fcntl(fd,F_SETFL,flag|O_NONBLOCK);
 }
 
-void error_handling(cahr *msg){
+void error_handling(char *msg){
     fputs(msg,stderr);
     fputc('\n',stderr);
     exit(1);
 }
-void * worker((void*) arg){
+void * worker(void* arg){
     int client = *((int *)arg);
     char req_line[SMALL_BUF];
     FILE * clnt_read;
     FILE * clnt_write;
     char method[10];
+    char ct[15];
     char file_name[30];
     
     clnt_read = fdopen(client,"r");
@@ -109,13 +113,13 @@ void * worker((void*) arg){
         fclose(clnt_write);
         return;
     }
-    strcpy(memset,strtok(req_line," /"));
+    strcpy(method,strtok(req_line," /"));
     strcpy(file_name,strtok(NULL," /"));
     strcpy(ct,content_type(file_name));
     if(strcmp(method,"GET") != 0){
         send_error(clnt_write);
-        close(clnt_read);
-        close(clnt_write);
+        fclose(clnt_read);
+        fclose(clnt_write);
         return ;
     }
     fclose(clnt_read);
@@ -123,10 +127,10 @@ void * worker((void*) arg){
     epoll_ctl(epfd,EPOLL_CTL_DEL,client,NULL);
 }
 
-void send_data(FILE * fp,char){
+void send_data(FILE * fp,char* ct,char* file_name){
     char protocal[] = "HTTP/1.0 200 OK\r\n";
     char server[] = "Server:Linux Web Server Pangine\r\n";
-    char cnt_len[] = "Content-length:2048\r\n";
+    char cnt_len[SMALL_BUF];
     char cnt_type[SMALL_BUF];
     char buf[BUF_SIZE];
     FILE* send_file;
@@ -134,8 +138,13 @@ void send_data(FILE * fp,char){
     send_file = fopen(file_name,"r");
     if(send_file == NULL){
         send_error(fp);
+        return ;
     }
-    
+    int prev = ftell(send_file);
+    fseek(send_file,0,SEEK_END);
+    int sz = ftell(send_file);
+    fseek(send_file,0,SEEK_SET);
+    sprintf(cnt_len,"Content-length:%d\r\n",sz);
     fputs(protocal,fp);
     fputs(server,fp);
     fputs(cnt_len,fp);
@@ -147,6 +156,7 @@ void send_data(FILE * fp,char){
     }
     fflush(fp);
     fclose(fp);
+    fclose(send_file);
 }
 
 char * content_type(char * file){

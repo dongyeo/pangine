@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include "threadPool.h"
-
+#include "mySignal.h"
 #define BUF_SIZE 1024
 #define SMALL_BUF 100
 #define EPOLL_SIZE 50
@@ -20,6 +20,7 @@ void send_error(FILE* fp);
 char* content_type(char * file);
 int epfd;
 int main(int argc,char * argv[]){
+    reg_sig();
     int serv_sock,clnt_sock,option;
     struct sockaddr_in serv_adr,clnt_adr;
     socklen_t opt_len, adr_size;

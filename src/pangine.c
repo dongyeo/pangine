@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <syslog.h>
+#include <sys/resource.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -12,14 +15,31 @@
 #define BUF_SIZE 1024
 #define SMALL_BUF 100
 #define EPOLL_SIZE 50
+#define LOCKFILE "/var/run/pangine.pid"
+#define LOCKMODE (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)
+
+int already_running(void);
 void set_no_blocking_mode(int fd);
 void error_handling(char  *msg);
 void *worker(void * arg);
 void send_data(FILE* fp,char* content,char* file_name);
 void send_error(FILE* fp);
+void daemonize(const char* cmd);
+int lockfile(int fd);
 char* content_type(char * file);
 int epfd;
 int main(int argc,char * argv[]){
+    char * cmd;
+    if((cmd = strrchr(argv[0],'/')) == NULL)
+        cmd = argv[0];
+    else
+        cmd++;
+    daemonize(cmd);
+    if(already_running()){
+        syslog(LOG_ERR,"daemon already is running");
+        exit(1);
+    }
+
     reg_sig();
     int serv_sock,clnt_sock,option;
     struct sockaddr_in serv_adr,clnt_adr;
@@ -164,4 +184,83 @@ void send_error(FILE * fp){
     fputs(cnt_type,fp);
     fputs(content,fp);
     fflush(fp);
+}
+void daemonize(const char* cmd){
+   
+    int i,fd0,fd1,fd2;
+    pid_t pid;
+    struct rlimit rl;
+    struct sigaction sa;
+    umask(0);
+    if(getrlimit(RLIMIT_NOFILE,&rl)<0){
+        error_handling("can't get file limit");
+    }
+    if((pid = fork())<0){
+        error_handling("can't fork");
+    }else if(pid !=0){
+        exit(0);
+    }
+    setsid();
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if(sigaction(SIGHUP,&sa,NULL) <0){
+        error_handling("can't ignore SIGHUP");
+    }
+    if((pid = fork())<0){
+        error_handling("can't fork");
+    }else if(pid !=0){
+        exit(0);
+    }
+    
+    if(chdir("/")<0){
+        error_handling("can't change directory to /");
+    }
+    
+    if(rl.rlim_max==RLIM_INFINITY)
+        rl.rlim_max = 1024;
+    for(i = 0;i , rl.rlim_max;i++){
+        close(i);
+    }
+    
+    fd0 = open("/dev/null",O_RDWR);
+    fd1 = dup(0);
+    fd2 = dup(0);
+    openlog(cmd,LOG_CONS,LOG_DAEMON);
+    if(fd0 != 0 || fd1 != 1 || fd2 !=2){
+        syslog(LOG_ERR,"unexpected file description %d %d %d",fd0,fd1,fd2);
+        exit(1);
+    }
+}
+int already_running(void){
+    int fd;
+    char buf[16];
+    
+    fd = open(LOCKFILE,O_RDWR|O_CREAT,LOCKMODE);
+    if(fd < 0){
+        syslog(LOG_ERR,"can't open %s:%s",LOCKFILE,strerror(errno));
+        exit(1);
+    }
+    if(lockfile(fd) < 0){
+        if(errno == EACCES || errno == EAGAIN){
+            close(fd);
+            return (1);
+        }
+        syslog(LOG_ERR,"can't lock %s:%s",LOCKFILE,strerror(errno));
+        exit(1);
+    }
+    ftruncate(fd,0);
+    sprintf(buf,"%ld",(long)getpid());
+    write(fd,buf,strlen(buf)+1);
+    return 0;
+}
+int lockfile(int fd)
+{
+    struct flock fl;
+    
+    fl.l_type = F_WRLCK;
+    fl.l_start = 0;
+    fl.l_whence = SEEK_SET;
+    fl.l_len = 0;
+    return(fcntl(fd, F_SETLK, &fl));
 }

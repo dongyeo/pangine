@@ -123,7 +123,7 @@ void * worker(void* arg){
     fclose(clnt_read);
     close(client);
     send_data(clnt_write,ct,file_name);
-    epoll_ctl(epfd,EPOLL_CTL_DEL,client,NULL);
+    // epoll_ctl(epfd,EPOLL_CTL_DEL,client,NULL);
 }
 
 void send_data(FILE * fp,char* ct,char* file_name){
@@ -184,6 +184,7 @@ void send_error(FILE * fp){
     fputs(cnt_type,fp);
     fputs(content,fp);
     fflush(fp);
+    fclose(fp);
 }
 void daemonize(const char* cmd){
    
@@ -219,7 +220,7 @@ void daemonize(const char* cmd){
     
     if(rl.rlim_max==RLIM_INFINITY)
         rl.rlim_max = 1024;
-    for(i = 0;i , rl.rlim_max;i++){
+    for(i = 0;i < rl.rlim_max;i++){
         close(i);
     }
     

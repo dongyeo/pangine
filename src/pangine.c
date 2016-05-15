@@ -12,6 +12,7 @@
 #include <errno.h>
 #include "threadPool.h"
 #include "mySignal.h"
+#include "cgiRequestParams.h"
 #define BUF_SIZE 1024
 #define SMALL_BUF 100
 #define EPOLL_SIZE 50
@@ -28,8 +29,9 @@ void daemonize(const char* cmd);
 int lockfile(int fd);
 char* content_type(char * file);
 int epfd;
+int end_with(const char * str,const char * suffix);
 int main(int argc,char * argv[]){
-    char * cmd;
+    /*char * cmd;
     if((cmd = strrchr(argv[0],'/')) == NULL)
         cmd = argv[0];
     else
@@ -38,7 +40,7 @@ int main(int argc,char * argv[]){
     if(already_running()){
         syslog(LOG_ERR,"daemon already is running");
         exit(1);
-    }
+    }*/
 
     reg_sig();
     int serv_sock,clnt_sock,option;
@@ -133,29 +135,36 @@ void send_data(FILE * fp,char* ct,char* file_name){
     char cnt_type[SMALL_BUF];
     char buf[BUF_SIZE];
     FILE* send_file;
-    sprintf(cnt_type,"Content-type:%s\r\n\r\n",ct);
-    send_file = fopen(file_name,"r");
-    if(send_file == NULL){
-        send_error(fp);
-        return ;
-    }
-    int prev = ftell(send_file);
-    fseek(send_file,0,SEEK_END);
-    int sz = ftell(send_file);
-    fseek(send_file,0,SEEK_SET);
-    sprintf(cnt_len,"Content-length:%d\r\n",sz);
-    fputs(protocal,fp);
-    fputs(server,fp);
-    fputs(cnt_len,fp);
-    fputs(cnt_type,fp);
-    
-    while(fgets(buf,BUF_SIZE,send_file) != NULL){
-        fputs(buf,fp);
-        fflush(fp);
+    if(end_with(file_name,".php")){
+        //TBD
+        cgi_request(fp);
+    }else{
+        sprintf(cnt_type,"Content-type:%s\r\n\r\n",ct);
+        char hole_file_name[100]="/var/www/";
+        strcat(hole_file_name,file_name);
+        send_file = fopen(hole_file_name,"r");
+        if(send_file == NULL){
+            send_error(fp);
+            return ;
+        }
+        int prev = ftell(send_file);
+        fseek(send_file,0,SEEK_END);
+        int sz = ftell(send_file);
+        fseek(send_file,0,SEEK_SET);
+        sprintf(cnt_len,"Content-length:%d\r\n",sz);
+        fputs(protocal,fp);
+        fputs(server,fp);
+        fputs(cnt_len,fp);
+        fputs(cnt_type,fp);
+        
+        while(fgets(buf,BUF_SIZE,send_file) != NULL){
+            fputs(buf,fp);
+            fflush(fp);
+        }
+        fclose(send_file);
     }
     fflush(fp);
     fclose(fp);
-    fclose(send_file);
 }
 
 char * content_type(char * file){
@@ -264,4 +273,14 @@ int lockfile(int fd)
     fl.l_whence = SEEK_SET;
     fl.l_len = 0;
     return(fcntl(fd, F_SETLK, &fl));
+}
+
+int end_with(const char * str,const char * suffix){
+    if (!str || !suffix)
+        return 0;
+    size_t lenstr = strlen(str);
+    size_t lensuffix = strlen(suffix);
+    if (lensuffix >  lenstr)
+        return 0;
+    return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
 }

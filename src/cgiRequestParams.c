@@ -118,11 +118,11 @@ void init_cgi_request_params(cgi_request_params* params){
     params->remote_addr_v = "139.129.92.22";
     params->server_name_v = "139.129.92.22";
     params->server_port_v = "8888";
-    params->server_protocol_v = "HTTP/1.1";
+    params->server_protocol_v = "HTTP/1.0";
     params->server_software_v = "PANGINE/1.0";
     params->query_string_v = "\0";
     params->request_method_v = "GET";
-    params->content_type_v = "\0";
+    params->content_type_v = "text/html";
     params->content_length_v = "\0";
     strcpy(params->script_file_path_prefix,"/var/www/");
 }

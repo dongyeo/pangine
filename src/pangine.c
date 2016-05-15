@@ -31,7 +31,7 @@ char* content_type(char * file);
 int epfd;
 int end_with(const char * str,const char * suffix);
 int main(int argc,char * argv[]){
-    /*char * cmd;
+    char * cmd;
     if((cmd = strrchr(argv[0],'/')) == NULL)
         cmd = argv[0];
     else
@@ -40,7 +40,7 @@ int main(int argc,char * argv[]){
     if(already_running()){
         syslog(LOG_ERR,"daemon already is running");
         exit(1);
-    }*/
+    }
 
     reg_sig();
     int serv_sock,clnt_sock,option;
@@ -137,6 +137,8 @@ void send_data(FILE * fp,char* ct,char* file_name){
     FILE* send_file;
     if(end_with(file_name,".php")){
         //TBD
+        fputs(protocal,fp);
+        fputs(server,fp);
         cgi_request(fp);
     }else{
         sprintf(cnt_type,"Content-type:%s\r\n\r\n",ct);

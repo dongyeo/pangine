@@ -139,7 +139,7 @@ void send_data(FILE * fp,char* ct,char* file_name){
         //TBD
         fputs(protocal,fp);
         fputs(server,fp);
-        cgi_request(fp);
+        cgi_request(fp,file_name);
     }else{
         sprintf(cnt_type,"Content-type:%s\r\n\r\n",ct);
         char hole_file_name[100]="/var/www/";

@@ -6,7 +6,7 @@
 #include <sys/socket.h>
 #include "cgi.h"
 #include "cgiRequestParams.h"
-void cgi_request(FILE * fp){
+void cgi_request(FILE * fp,char * filename){
     int sd;
     struct sockaddr_in serv_adr;
     sd = socket(PF_INET,SOCK_STREAM,0);
@@ -43,7 +43,7 @@ void cgi_request(FILE * fp){
     
     char * a=(char*) malloc(sizeof(char)*CGI_SMALL_BUF);
     cgi_request_params *params =(cgi_request_params*) malloc(sizeof(cgi_request_params));
-    params->file_name="info.php";
+    params->file_name=filename;
     init_cgi_request_params(params);
     int len = generate_request_params_stream(a,params);
     int low = len & 0xff;

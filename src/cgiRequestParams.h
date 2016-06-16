@@ -24,7 +24,7 @@ typedef struct cgi_request_params_t{
 void init_cgi_request_params(cgi_request_params* params);
 int generate_request_params_stream(char* out,cgi_request_params* params);
 void add(int * len,char * src,char *key,char *value);
-void cgi_request(FILE * fp);
+void cgi_request(FILE * fp,char * filename);
 
 /*void init_cgi_request_params(cgi_request_params* params){
     params->remote_host_v="";
